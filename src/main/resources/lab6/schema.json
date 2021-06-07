@@ -1,0 +1,14 @@
+[
+  {
+      "description": "Pub/Sub event timestamp",
+      "name": "event_timestamp",
+      "mode": "REQUIRED",
+      "type": "TIMESTAMP"
+  },
+  {
+      "description": "Transaction time string",
+      "name": "tr_time_str",
+      "mode": NULLABLE,
+      "type": "STRING"
+  }
+]

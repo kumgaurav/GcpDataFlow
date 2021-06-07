@@ -1,4 +1,5 @@
 #Basic Etl
+git clone https://github.com/GoogleCloudPlatform/training-data-analyst.git
 
 To Build
 
@@ -30,3 +31,8 @@ mvn compile exec:java \
 --stagingLocation=${PIPELINE_FOLDER}/staging \
 --tempLocation=${PIPELINE_FOLDER}/temp \
 --runner=${RUNNER}"
+
+
+echo $PROJECT_ID
+gcloud auth login
+gcloud init

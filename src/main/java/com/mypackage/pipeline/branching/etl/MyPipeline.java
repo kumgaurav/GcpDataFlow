@@ -14,20 +14,24 @@
  * limitations under the License.
  */
 
-package com.mypackage.pipeline;
+package com.mypackage.pipeline.branching.etl;
 
-//TODO: Add imports
 import com.google.gson.Gson;
 import org.apache.beam.runners.dataflow.options.DataflowPipelineOptions;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.PipelineResult;
 import org.apache.beam.sdk.io.TextIO;
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO;
+import org.apache.beam.sdk.options.Description;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.schemas.JavaFieldSchema;
 import org.apache.beam.sdk.schemas.annotations.DefaultSchema;
+import org.apache.beam.sdk.schemas.transforms.DropFields;
+import org.apache.beam.sdk.schemas.transforms.Filter;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.ParDo;
+import org.apache.beam.sdk.values.PCollection;
+import org.apache.beam.sdk.values.Row;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,6 +48,17 @@ public class MyPipeline {
      * executor at the command-line.
      */
     public interface Options extends DataflowPipelineOptions {
+        @Description("Path to events.json")
+        String getInputPath();
+        void setInputPath(String inputPath);
+
+        @Description("Path to coldline storage bucket")
+        String getOutputPath();
+        void setOutputPath(String outputPath);
+
+        @Description("BigQuery table name")
+        String getTableName();
+        void setTableName(String tableName);
     }
 
     /**
@@ -56,21 +71,21 @@ public class MyPipeline {
      * @param args The command-line args passed by the executor.
      */
     public static void main(String[] args) {
-        Options options = PipelineOptionsFactory.fromArgs(args).as(Options.class);
+        Options options = PipelineOptionsFactory.fromArgs(args).withValidation().as(Options.class);
 
         run(options);
     }
 
     /**
      * A class used for parsing JSON web server events
-     * Annotated with @DefaultSchema to the allow the use of Beam Schemas and <Row> object
+     * Annotated with @DefaultSchema to the allow the use of Beam Schema and <Row> object
      */
     @DefaultSchema(JavaFieldSchema.class)
     public static class CommonLog {
         String user_id;
         String ip;
-        Double lat;
-        Double lng;
+        @javax.annotation.Nullable Double lat;
+        @javax.annotation.Nullable Double lng;
         String timestamp;
         String http_request;
         String user_agent;
@@ -91,7 +106,6 @@ public class MyPipeline {
         }
     }
 
-
     /**
      * Runs the pipeline to completion with the specified options. This method does
      * not wait until the pipeline is finished before returning. Invoke
@@ -106,11 +120,6 @@ public class MyPipeline {
         // Create the pipeline
         Pipeline pipeline = Pipeline.create(options);
         options.setJobName("my-pipeline-" + System.currentTimeMillis());
-        options.setTempLocation("gs://qwiklabs-gcp-00-738bf0b23158/temp");
-
-        // Static input and output
-        String input = "gs://qwiklabs-gcp-00-738bf0b23158/events.json";
-        String output = "qwiklabs-gcp-00-738bf0b23158:logs.logs";
 
         /*
          * Steps:
@@ -119,10 +128,18 @@ public class MyPipeline {
          * 3) Write something
          */
 
-        pipeline.apply("ReadFromGCS", TextIO.read().from(input))
-                .apply("ParseJson", ParDo.of(new JsonToCommonLog()))
+        // Read in lines to an initial PCollection that can then be branched off of
+        PCollection<String> lines = pipeline.apply("ReadFromGCS", TextIO.read().from(options.getInputPath()));
+
+        // Write to Google Cloud Storage
+        lines.apply("WriteRawToGCS", TextIO.write().to(options.getOutputPath()));
+
+        // Convert elements to CommonLog, filter out individual elements, and write to BigQuery
+        lines.apply("ParseJson", ParDo.of(new JsonToCommonLog()))
+                .apply("DropFields", DropFields.fields("user_agent"))
+                .apply("FilterFn", Filter.<Row>create().whereFieldName("num_bytes", (Long num_bytes) -> num_bytes < 120))
                 .apply("WriteToBQ",
-                        BigQueryIO.<CommonLog>write().to(output).useBeamSchema()
+                        BigQueryIO.<Row>write().to(options.getTableName()).useBeamSchema()
                                 .withWriteDisposition(BigQueryIO.Write.WriteDisposition.WRITE_TRUNCATE)
                                 .withCreateDisposition(BigQueryIO.Write.CreateDisposition.CREATE_IF_NEEDED));
         LOG.info("Building pipeline...");
